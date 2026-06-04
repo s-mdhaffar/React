@@ -1,25 +1,26 @@
-import { useState } from 'react'
 import reactLogo from './assets/react.svg'
 import viteLogo from '/vite.svg'
 import './App.css'
-import Button from './components/Button'
+
 import PhoneModal from './components/PhoneModal'
+import Button from './components/Button'
+import { useAppDispatch, useAppSelector } from './store/hooks'
+import { increment, setModalOpen, setPhoneNumber } from './store/appSlice'
 
 function App() {
-  const [count, setCount] = useState(0)
-  const [isModalOpen, setIsModalOpen] = useState(false)
-  const [phoneNumber, setPhoneNumber] = useState('')
+  const dispatch = useAppDispatch()
+  const { count, isModalOpen, phoneNumber } = useAppSelector((state) => state.app)
 
   const handleOpenModal = () => {
-    setIsModalOpen(true)
+    dispatch(setModalOpen(true))
   }
 
   const handleCloseModal = () => {
-    setIsModalOpen(false)
+    dispatch(setModalOpen(false))
   }
 
   const handleSavePhone = (phone: string) => {
-    setPhoneNumber(phone)
+    dispatch(setPhoneNumber(phone))
   }
 
   return (
@@ -40,7 +41,7 @@ function App() {
       </div>
       <h1>Vite + React</h1>
       <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
+        <button onClick={() => dispatch(increment())}>
           count is {count}
         </button>
         <p>

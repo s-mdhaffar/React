@@ -1,6 +1,25 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import './PhoneModal.scss';
 import { PhoneNumberUtil, PhoneNumberFormat } from 'google-libphonenumber';
+import { countryNames } from '../../utils/countries';
+
+const phoneUtil = PhoneNumberUtil.getInstance();
+
+// Generate country list with dial codes statically
+const countries = Object.entries(countryNames).map(([code, name]) => {
+  const dialCode = phoneUtil.getCountryCodeForRegion(code);
+  return {
+    code,
+    name,
+    dialCode: `+${dialCode}`,
+  };
+}).sort((a, b) => {
+  // Prioritize Tunisia
+  if (a.code === 'TN') return -1;
+  if (b.code === 'TN') return 1;
+  // Sort others alphabetically
+  return a.name.localeCompare(b.name);
+});
 
 interface PhoneModalProps {
   isOpen: boolean;
@@ -9,85 +28,29 @@ interface PhoneModalProps {
   currentPhoneNumber?: string;
 }
 
-interface CountryOption {
-  code: string;
-  name: string;
-  dialCode: string;
-}
-
 const PhoneModal: React.FC<PhoneModalProps> = ({ isOpen, onClose, onSave, currentPhoneNumber }) => {
   const [selectedCountry, setSelectedCountry] = useState('US');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [error, setError] = useState('');
-  const phoneUtil = PhoneNumberUtil.getInstance();
+  const [isValid, setIsValid] = useState(false);
+  const modalRef = useRef<HTMLDivElement>(null);
 
-  // Generate country list with dial codes
-  const countries: CountryOption[] = useMemo(() => {
-    const countryNames: { [key: string]: string } = {
-      'US': 'United States',
-      'GB': 'United Kingdom',
-      'CA': 'Canada',
-      'AU': 'Australia',
-      'DE': 'Germany',
-      'FR': 'France',
-      'IT': 'Italy',
-      'ES': 'Spain',
-      'NL': 'Netherlands',
-      'BE': 'Belgium',
-      'CH': 'Switzerland',
-      'AT': 'Austria',
-      'SE': 'Sweden',
-      'NO': 'Norway',
-      'DK': 'Denmark',
-      'FI': 'Finland',
-      'PL': 'Poland',
-      'RU': 'Russia',
-      'CN': 'China',
-      'JP': 'Japan',
-      'KR': 'South Korea',
-      'IN': 'India',
-      'BR': 'Brazil',
-      'MX': 'Mexico',
-      'AR': 'Argentina',
-      'CL': 'Chile',
-      'CO': 'Colombia',
-      'PE': 'Peru',
-      'ZA': 'South Africa',
-      'EG': 'Egypt',
-      'NG': 'Nigeria',
-      'KE': 'Kenya',
-      'SA': 'Saudi Arabia',
-      'AE': 'United Arab Emirates',
-      'IL': 'Israel',
-      'TR': 'Turkey',
-      'GR': 'Greece',
-      'PT': 'Portugal',
-      'IE': 'Ireland',
-      'NZ': 'New Zealand',
-      'SG': 'Singapore',
-      'MY': 'Malaysia',
-      'TH': 'Thailand',
-      'VN': 'Vietnam',
-      'PH': 'Philippines',
-      'ID': 'Indonesia',
-      'PK': 'Pakistan',
-      'BD': 'Bangladesh',
-      'UA': 'Ukraine',
-      'RO': 'Romania',
-      'CZ': 'Czech Republic',
-      'HU': 'Hungary',
-      'BG': 'Bulgaria',
-    };
-
-    return Object.entries(countryNames).map(([code, name]) => {
-      const dialCode = phoneUtil.getCountryCodeForRegion(code);
-      return {
-        code,
-        name,
-        dialCode: `+${dialCode}`,
-      };
-    }).sort((a, b) => a.name.localeCompare(b.name));
-  }, [phoneUtil]);
+  // Validate number on change
+  useEffect(() => {
+    const dialCode = countries.find(c => c.code === selectedCountry)?.dialCode || '';
+    const fullNumber = `${dialCode}${phoneNumber}`;
+    
+    try {
+      if (!phoneNumber) {
+        setIsValid(false);
+        return;
+      }
+      const parsedNumber = phoneUtil.parse(fullNumber, selectedCountry);
+      setIsValid(phoneUtil.isValidNumber(parsedNumber));
+    } catch {
+      setIsValid(false);
+    }
+  }, [phoneNumber, selectedCountry]);
 
   // Parse and populate existing phone number when modal opens
   useEffect(() => {
@@ -103,7 +66,6 @@ const PhoneModal: React.FC<PhoneModalProps> = ({ isOpen, onClose, onSave, curren
           setPhoneNumber(nationalNumber);
         }
       } catch (err) {
-        // If parsing fails, just keep the default values
         console.error('Error parsing phone number:', err);
       }
     } else if (isOpen && !currentPhoneNumber) {
@@ -112,55 +74,113 @@ const PhoneModal: React.FC<PhoneModalProps> = ({ isOpen, onClose, onSave, curren
       setPhoneNumber('');
       setError('');
     }
-  }, [isOpen, currentPhoneNumber, phoneUtil]);
+  }, [isOpen, currentPhoneNumber]);
+
+  // Focus trap and Esc key listener
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const modalElement = modalRef.current;
+    if (!modalElement) return;
+
+    // Focus first focusable element
+    const focusableElements = modalElement.querySelectorAll(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    const firstElement = focusableElements[0] as HTMLElement;
+    const lastElement = focusableElements[focusableElements.length - 1] as HTMLElement;
+
+    if (firstElement) {
+      firstElement.focus();
+    }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        handleClose();
+      }
+
+      if (e.key === 'Tab') {
+        if (e.shiftKey) {
+          if (document.activeElement === firstElement) {
+            e.preventDefault();
+            lastElement.focus();
+          }
+        } else {
+          if (document.activeElement === lastElement) {
+            e.preventDefault();
+            firstElement.focus();
+          }
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen]);
+
+  const handleClose = () => {
+    setError('');
+    onClose();
+  };
 
   const handleSave = () => {
+    if (!isValid) return;
+
     const dialCode = countries.find(c => c.code === selectedCountry)?.dialCode || '';
     const fullNumber = `${dialCode}${phoneNumber}`;
     
     try {
-      // Parse and validate the phone number
       const parsedNumber = phoneUtil.parse(fullNumber, selectedCountry);
-      const isValid = phoneUtil.isValidNumber(parsedNumber);
-      
-      if (!isValid) {
-        setError('Invalid phone number. Please check and try again.');
-        return;
-      }
-      
-      // Format the phone number in international format
       const formattedNumber = phoneUtil.format(parsedNumber, PhoneNumberFormat.INTERNATIONAL);
       
       onSave(formattedNumber);
-      onClose();
+      handleClose();
     } catch (err) {
-      setError('Invalid phone number format. Please check the number.');
+      setError('Invalid phone number format.');
     }
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        <h2>Enter Phone Number</h2>
+    <div 
+      className="modal-overlay" 
+      onClick={handleClose}
+      aria-modal="true"
+      role="dialog"
+      aria-labelledby="modal-title"
+    >
+      <div 
+        className="modal-content" 
+        onClick={(e) => e.stopPropagation()}
+        ref={modalRef}
+      >
+        <h2 id="modal-title">Enter Phone Number</h2>
         
         <div className="input-group">
           <label>Phone Number</label>
           <div className="phone-inputs">
-            <select
-              id="country-select"
-              className="country-select"
-              value={selectedCountry}
-              onChange={(e) => setSelectedCountry(e.target.value)}
-              aria-label="Select Country"
-            >
-              {countries.map((country) => (
-                <option key={country.code} value={country.code}>
-                  {country.name} ({country.dialCode})
-                </option>
-              ))}
-            </select>
+            <div className="select-wrapper">
+              <span className="selected-prefix">
+                {countries.find(c => c.code === selectedCountry)?.dialCode}
+              </span>
+              <select
+                id="country-select"
+                className="country-select"
+                value={selectedCountry}
+                onChange={(e) => setSelectedCountry(e.target.value)}
+                aria-label="Select Country"
+              >
+                {countries.map((country) => (
+                  <option key={country.code} value={country.code}>
+                    {country.name} ({country.dialCode})
+                  </option>
+                ))}
+              </select>
+            </div>
             <input
               id="phone-number"
               type="tel"
@@ -175,10 +195,14 @@ const PhoneModal: React.FC<PhoneModalProps> = ({ isOpen, onClose, onSave, curren
         </div>
 
         <div className="modal-buttons">
-          <button className="save-btn" onClick={handleSave}>
+          <button 
+            className="save-btn" 
+            onClick={handleSave}
+            disabled={!isValid}
+          >
             Save
           </button>
-          <button className="close-btn" onClick={onClose}>
+          <button className="close-btn" onClick={handleClose}>
             Close
           </button>
         </div>
